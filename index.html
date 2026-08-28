@@ -138,6 +138,13 @@
   .img-modal img{max-width:100%;background:#fff;border-radius:4px;box-shadow:0 6px 24px rgba(0,0,0,.4);}
   .img-modal button{margin-top:14px;}
 
+  .backup-modal{position:fixed;inset:0;background:rgba(20,18,14,.85);z-index:999;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .backup-box{background:#fff;border-radius:12px;padding:18px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;gap:10px;}
+  .backup-box h3{margin:0;font-size:15px;}
+  .backup-box p{margin:0;font-size:12px;color:#6b6558;line-height:1.5;}
+  .backup-box textarea{width:100%;flex:1;min-height:160px;font-family:monospace;font-size:12px;padding:10px;border:1px solid #cfc9ba;border-radius:8px;resize:vertical;}
+  .backup-box .btn-row{margin:0;}
+
   /* ---- checklist ---- */
   .modeswitch{display:flex;background:#efece3;border-radius:10px;padding:4px;margin-bottom:14px;gap:4px;}
   .modeswitch button{flex:1;padding:10px 0;border:none;border-radius:8px;font-size:14px;font-weight:700;background:transparent;color:#6b6558;}
@@ -236,6 +243,14 @@
       <thead><tr><th style="text-align:left;">材料</th><th>醬油</th><th>鹽味</th></tr></thead>
       <tbody id="inputBody"></tbody>
     </table>
+
+    <div class="panel" style="margin-top:18px;">
+      <div class="status" style="margin-top:0;margin-bottom:8px;">配方存在這台裝置的瀏覽器裡，換手機/換瀏覽器時請先「匯出」，再到新裝置「匯入」。</div>
+      <div class="btn-row">
+        <button id="exportBtn" class="secondary">匯出所有配方</button>
+        <button id="importBtn" class="secondary">匯入配方</button>
+      </div>
+    </div>
   </section>
 
   <!-- ============ TAB 2: 列印表單 ============ -->
@@ -529,12 +544,27 @@ document.getElementById('doneAllBtn').addEventListener('click', () => {
   renderChecklist();
 });
 
-/* ---------- persistence ---------- */
+/* ---------- persistence (localStorage — works on any real hosted page, per-device) ---------- */
+const storage = {
+  async get(key){
+    const v = localStorage.getItem(key);
+    if(v === null) throw new Error('not found: ' + key);
+    return {key, value: v};
+  },
+  async set(key, value){
+    localStorage.setItem(key, value);
+    return {key, value};
+  },
+  async delete(key){
+    localStorage.removeItem(key);
+    return {key, deleted: true};
+  }
+};
 const INDEX_KEY = 'tare-recipe-index';
 async function refreshPresetList(){
   presetSelect.innerHTML = '<option value="">— 選擇載入 —</option>';
   try{
-    const idx = await window.storage.get(INDEX_KEY);
+    const idx = await storage.get(INDEX_KEY);
     const names = idx ? JSON.parse(idx.value) : [];
     names.forEach(n => {
       const opt = document.createElement('option');
@@ -547,10 +577,10 @@ async function saveRecipe(){
   const name = recipeNameInput.value.trim();
   if(!name){ statusEdit.textContent = '請先輸入配方名稱再儲存。'; return; }
   try{
-    await window.storage.set('tare-recipe:' + name, JSON.stringify(recipe));
+    await storage.set('tare-recipe:' + name, JSON.stringify(recipe));
     let names = [];
-    try{ const idx = await window.storage.get(INDEX_KEY); names = idx ? JSON.parse(idx.value) : []; }catch(e){ names = []; }
-    if(!names.includes(name)){ names.push(name); await window.storage.set(INDEX_KEY, JSON.stringify(names)); }
+    try{ const idx = await storage.get(INDEX_KEY); names = idx ? JSON.parse(idx.value) : []; }catch(e){ names = []; }
+    if(!names.includes(name)){ names.push(name); await storage.set(INDEX_KEY, JSON.stringify(names)); }
     await refreshPresetList();
     presetSelect.value = name;
     statusEdit.textContent = `已儲存「${name}」。`;
@@ -560,7 +590,7 @@ async function loadRecipe(){
   const name = presetSelect.value;
   if(!name){ statusEdit.textContent = '請先從清單選擇一份配方。'; return; }
   try{
-    const res = await window.storage.get('tare-recipe:' + name);
+    const res = await storage.get('tare-recipe:' + name);
     if(res){
       recipe = JSON.parse(res.value);
       recipeNameInput.value = name;
@@ -576,11 +606,11 @@ async function deleteRecipe(){
   const name = presetSelect.value;
   if(!name){ statusEdit.textContent = '請先從清單選擇要刪除的配方。'; return; }
   try{
-    await window.storage.delete('tare-recipe:' + name);
-    const idx = await window.storage.get(INDEX_KEY);
+    await storage.delete('tare-recipe:' + name);
+    const idx = await storage.get(INDEX_KEY);
     let names = idx ? JSON.parse(idx.value) : [];
     names = names.filter(n => n !== name);
-    await window.storage.set(INDEX_KEY, JSON.stringify(names));
+    await storage.set(INDEX_KEY, JSON.stringify(names));
     await refreshPresetList();
     statusEdit.textContent = `已刪除「${name}」。`;
   }catch(e){ statusEdit.textContent = '刪除失敗，請稍後再試。'; }
@@ -588,6 +618,80 @@ async function deleteRecipe(){
 document.getElementById('saveBtn').addEventListener('click', saveRecipe);
 document.getElementById('loadBtn').addEventListener('click', loadRecipe);
 document.getElementById('deleteBtn').addEventListener('click', deleteRecipe);
+
+/* ---------- backup / restore across devices ---------- */
+async function gatherAllRecipes(){
+  let names = [];
+  try{ const idx = await storage.get(INDEX_KEY); names = JSON.parse(idx.value); }catch(e){ names = []; }
+  const data = {};
+  for(const n of names){
+    try{ const r = await storage.get('tare-recipe:' + n); data[n] = JSON.parse(r.value); }catch(e){}
+  }
+  return { names, data };
+}
+
+function showBackupModal({title, hint, value, onConfirm, confirmLabel}){
+  const modal = document.createElement('div');
+  modal.className = 'backup-modal';
+  modal.innerHTML = `
+    <div class="backup-box">
+      <h3>${title}</h3>
+      <p>${hint}</p>
+      <textarea id="backupText">${value ? escapeHtml(value) : ''}</textarea>
+      <div class="btn-row">
+        <button id="backupClose" class="secondary">關閉</button>
+        ${onConfirm ? `<button id="backupConfirm">${confirmLabel}</button>` : ''}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.getElementById('backupClose').addEventListener('click', () => modal.remove());
+  if(onConfirm){
+    document.getElementById('backupConfirm').addEventListener('click', async () => {
+      const text = document.getElementById('backupText').value;
+      await onConfirm(text);
+      modal.remove();
+    });
+  }
+  return modal;
+}
+
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  const { data } = await gatherAllRecipes();
+  const json = JSON.stringify(data, null, 2);
+  const modal = showBackupModal({
+    title: '匯出所有配方',
+    hint: '請全選、複製這段文字，傳到新裝置後用「匯入配方」貼上還原。',
+    value: json
+  });
+  const ta = modal.querySelector('#backupText');
+  ta.focus(); ta.select();
+});
+
+document.getElementById('importBtn').addEventListener('click', () => {
+  showBackupModal({
+    title: '匯入配方',
+    hint: '請把從舊裝置匯出的文字貼在下面，再按「匯入」。這會新增/覆蓋同名配方，不會刪除現有其他配方。',
+    value: '',
+    confirmLabel: '匯入',
+    onConfirm: async (text) => {
+      try{
+        const data = JSON.parse(text);
+        let names = [];
+        try{ const idx = await storage.get(INDEX_KEY); names = JSON.parse(idx.value); }catch(e){ names = []; }
+        for(const [name, val] of Object.entries(data)){
+          await storage.set('tare-recipe:' + name, JSON.stringify(val));
+          if(!names.includes(name)) names.push(name);
+        }
+        await storage.set(INDEX_KEY, JSON.stringify(names));
+        await refreshPresetList();
+        statusEdit.textContent = `已匯入 ${Object.keys(data).length} 份配方。`;
+      }catch(e){
+        statusEdit.textContent = '匯入失敗，請確認貼上的文字完整且未經過修改。';
+      }
+    }
+  });
+});
 
 /* ---------- init ---------- */
 buildInputRows();
