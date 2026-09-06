@@ -146,26 +146,64 @@
   .backup-box .btn-row{margin:0;}
 
   /* ---- checklist ---- */
-  .modeswitch{display:flex;background:#efece3;border-radius:10px;padding:4px;margin-bottom:14px;gap:4px;}
-  .modeswitch button{flex:1;padding:10px 0;border:none;border-radius:8px;font-size:14px;font-weight:700;background:transparent;color:#6b6558;}
-  .modeswitch button.active{background:var(--ink);color:#fff;}
-
   .progress-wrap{margin-bottom:14px;}
   .progress-label{display:flex;justify-content:space-between;font-size:12px;color:#6b6558;margin-bottom:6px;}
   .progress-bar{height:8px;background:#e6e2d5;border-radius:5px;overflow:hidden;}
   .progress-fill{height:100%;background:var(--good);width:0%;transition:width .25s ease;}
 
-  .list{display:flex;flex-direction:column;gap:10px;margin-bottom:18px;}
-  .item{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--hair);border-radius:12px;padding:14px 14px;transition:background .15s ease, border-color .15s ease;}
-  .item.done{background:var(--good-bg);border-color:#bcdcc2;}
-  .item .check{width:26px;height:26px;border-radius:50%;border:2px solid #b9b3a2;flex:none;display:flex;align-items:center;justify-content:center;font-size:15px;color:transparent;transition:all .15s ease;}
-  .item.done .check{background:var(--good);border-color:var(--good);color:#fff;}
-  .item .name{flex:1;font-size:16px;font-weight:500;}
-  .item.done .name{color:#4a4638;text-decoration:line-through;text-decoration-color:#9db8a0;}
-  .item .amount{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;min-width:44px;text-align:right;}
-  .item.done .amount{color:var(--good);}
-  .item.empty{opacity:.4;}
-  .section-label{font-size:12px;color:#8a8474;margin:4px 2px 2px;letter-spacing:.05em;}
+  .check-table{width:100%;border-collapse:collapse;margin-bottom:18px;table-layout:fixed;}
+  .check-table th{
+    position:sticky;
+    top:0;
+    z-index:5;
+    background:var(--ink);
+    color:#fff;
+    font-size:13px;
+    font-weight:600;
+    padding:11px 6px;
+    border:1px solid var(--ink);
+  }
+  .check-table th.label-col{text-align:left;padding-left:14px;}
+  .check-table td{
+    border:1px solid var(--hair);
+    padding:0;
+    text-align:center;
+    font-size:15px;
+    height:52px;
+  }
+  .check-table td.label{
+    text-align:left;
+    padding:0 14px;
+    background:#fbfaf6;
+    font-weight:500;
+    font-size:15px;
+  }
+  .check-table tr.group-start td{border-top:3px solid var(--ink);}
+  .check-table td.amount-cell{
+    font-weight:700;
+    font-variant-numeric:tabular-nums;
+    cursor:pointer;
+  }
+  .check-table td.amount-cell .inner{
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    height:100%;width:100%;
+  }
+  .check-table td.amount-cell.empty{color:#c7c2b3;cursor:default;}
+  .check-table td.amount-cell.done{
+    background:var(--good-bg);
+    color:var(--good);
+  }
+  .check-table td.amount-cell .dot{
+    width:18px;height:18px;border-radius:50%;
+    border:2px solid #b9b3a2;
+    flex:none;
+    display:flex;align-items:center;justify-content:center;
+    font-size:11px;color:transparent;
+  }
+  .check-table td.amount-cell.empty .dot{border-color:#ddd8cb;}
+  .check-table td.amount-cell.done .dot{
+    background:var(--good);border-color:var(--good);color:#fff;
+  }
   .empty-state{text-align:center;padding:40px 20px;color:#8a8474;font-size:14px;line-height:1.7;}
 
   /* ---- bottom tab bar ---- */
@@ -275,10 +313,6 @@
 
   <!-- ============ TAB 3: 打勾確認 ============ -->
   <section id="tab-check" class="tab-panel">
-    <div class="modeswitch">
-      <button id="modeShoyu" class="active">醬油 Tare</button>
-      <button id="modeShio">鹽味 Tare</button>
-    </div>
     <div class="progress-wrap">
       <div class="progress-label">
         <span id="progressText">0 / 0 已完成</span>
@@ -286,7 +320,13 @@
       </div>
       <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
     </div>
-    <div id="listArea"></div>
+    <table class="check-table" id="checkTable">
+      <thead>
+        <tr><th class="label-col">材料</th><th>醬油</th><th>鹽味</th></tr>
+      </thead>
+      <tbody id="checkBody"></tbody>
+    </table>
+    <div id="checkEmptyState"></div>
     <div class="btn-row">
       <button id="resetBtn" class="secondary">重置勾選</button>
       <button id="doneAllBtn">全部完成</button>
@@ -309,7 +349,6 @@ const LOGO_DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAAC6CAY
 let recipe = {};
 ALL_ROWS.forEach(r => recipe[r] = {shoyu:"", shio:""});
 let checked = { shoyu:{}, shio:{} };
-let checkMode = "shoyu";
 
 /* ---------- elements ---------- */
 const inputBody = document.getElementById('inputBody');
@@ -471,76 +510,85 @@ document.getElementById('pdfBtn').addEventListener('click', downloadPDF);
 document.getElementById('printBtn').addEventListener('click', () => window.print());
 
 /* ---------- Checklist tab ---------- */
-const listArea = document.getElementById('listArea');
+const checkBody = document.getElementById('checkBody');
+const checkEmptyState = document.getElementById('checkEmptyState');
 const progressText = document.getElementById('progressText');
 const progressPct = document.getElementById('progressPct');
 const progressFill = document.getElementById('progressFill');
 
-function buildItem(name){
-  const val = (recipe[name][checkMode] ?? "").toString().trim();
-  const item = document.createElement('div');
-  item.className = 'item';
-  if(val === "") item.classList.add('empty');
-  if(checked[checkMode][name]) item.classList.add('done');
-  item.innerHTML = `
-    <div class="check">✓</div>
-    <div class="name">${name}</div>
-    <div class="amount">${val === "" ? "—" : escapeHtml(val)}</div>
-  `;
-  if(val !== ""){
-    item.addEventListener('click', () => {
-      checked[checkMode][name] = !checked[checkMode][name];
-      item.classList.toggle('done');
-      updateProgress();
-    });
+function buildAmountCell(name, flavor){
+  const val = (recipe[name][flavor] ?? "").toString().trim();
+  const td = document.createElement('td');
+  td.className = 'amount-cell';
+  if(val === ''){
+    td.classList.add('empty');
+    td.innerHTML = `<div class="inner"><span class="dot"></span><span>—</span></div>`;
+    return td;
   }
-  return item;
+  if(checked[flavor][name]) td.classList.add('done');
+  td.innerHTML = `<div class="inner"><span class="dot">✓</span><span>${escapeHtml(val)}</span></div>`;
+  td.addEventListener('click', () => {
+    checked[flavor][name] = !checked[flavor][name];
+    td.classList.toggle('done');
+    updateProgress();
+  });
+  return td;
 }
+
+function buildRow(name, isGroupStart){
+  const tr = document.createElement('tr');
+  if(isGroupStart) tr.classList.add('group-start');
+  const tdLabel = document.createElement('td');
+  tdLabel.className = 'label';
+  tdLabel.textContent = name;
+  tr.appendChild(tdLabel);
+  tr.appendChild(buildAmountCell(name, 'shoyu'));
+  tr.appendChild(buildAmountCell(name, 'shio'));
+  return tr;
+}
+
 function renderChecklist(){
-  listArea.innerHTML = "";
-  const hasAny = ALL_ROWS.some(r => (recipe[r][checkMode] ?? "").toString().trim() !== "");
+  checkBody.innerHTML = "";
+  const hasAny = ALL_ROWS.some(r => (recipe[r].shoyu ?? "").toString().trim() !== "" || (recipe[r].shio ?? "").toString().trim() !== "");
   if(!hasAny){
-    listArea.innerHTML = `<div class="empty-state">這個口味目前沒有配方數字。<br>請先到「編輯配方」分頁輸入配方。</div>`;
+    document.getElementById('checkTable').style.display = 'none';
+    checkEmptyState.innerHTML = `<div class="empty-state">目前沒有配方數字。<br>請先到「編輯配方」分頁輸入配方。</div>`;
     updateProgress();
     return;
   }
-  const wrap = document.createElement('div');
-  wrap.className = 'list';
-  GROUP1.forEach(name => wrap.appendChild(buildItem(name)));
-  const sectionLabel = document.createElement('div');
-  sectionLabel.className = 'section-label';
-  sectionLabel.textContent = '二次鹽 / 收尾';
-  wrap.appendChild(sectionLabel);
-  GROUP2.forEach(name => wrap.appendChild(buildItem(name)));
-  listArea.appendChild(wrap);
+  document.getElementById('checkTable').style.display = '';
+  checkEmptyState.innerHTML = '';
+  ALL_ROWS.forEach((name, idx) => {
+    checkBody.appendChild(buildRow(name, idx === GROUP1.length));
+  });
   updateProgress();
 }
+
 function updateProgress(){
-  const active = ALL_ROWS.filter(r => (recipe[r][checkMode] ?? "").toString().trim() !== "");
-  const done = active.filter(r => checked[checkMode][r]).length;
-  const total = active.length;
+  let done = 0, total = 0;
+  ALL_ROWS.forEach(name => {
+    ['shoyu','shio'].forEach(flavor => {
+      if((recipe[name][flavor] ?? "").toString().trim() !== ""){
+        total++;
+        if(checked[flavor][name]) done++;
+      }
+    });
+  });
   progressText.textContent = `${done} / ${total} 已完成`;
   progressPct.textContent = total ? Math.round(done/total*100) + '%' : '0%';
   progressFill.style.width = total ? (done/total*100) + '%' : '0%';
 }
-document.getElementById('modeShoyu').addEventListener('click', () => {
-  checkMode = 'shoyu';
-  document.getElementById('modeShoyu').classList.add('active');
-  document.getElementById('modeShio').classList.remove('active');
-  renderChecklist();
-});
-document.getElementById('modeShio').addEventListener('click', () => {
-  checkMode = 'shio';
-  document.getElementById('modeShio').classList.add('active');
-  document.getElementById('modeShoyu').classList.remove('active');
-  renderChecklist();
-});
+
 document.getElementById('resetBtn').addEventListener('click', () => {
-  checked[checkMode] = {};
+  checked = { shoyu:{}, shio:{} };
   renderChecklist();
 });
 document.getElementById('doneAllBtn').addEventListener('click', () => {
-  ALL_ROWS.forEach(r => { if((recipe[r][checkMode] ?? "").toString().trim() !== "") checked[checkMode][r] = true; });
+  ALL_ROWS.forEach(name => {
+    ['shoyu','shio'].forEach(flavor => {
+      if((recipe[name][flavor] ?? "").toString().trim() !== "") checked[flavor][name] = true;
+    });
+  });
   renderChecklist();
 });
 
